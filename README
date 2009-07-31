@@ -1,0 +1,11 @@
+pyXLSX - A python class library for reading Excel 2007 files
+Author: Lee Gao
+Website: http://6.dot.ch/
+
+Usage
+
+from xlsx import workbook
+
+Workbook = workbook("File.xlsx")
+Workbook.Sheets.Sheet1.A1 # Accesses the cell 'A1' in the Sheet1 worksheet.
+Workbook.Sheets.Sheet1["A1"] # Same as above
