@@ -39,7 +39,7 @@ class workbook(object):
             _sheets = ls["xl/workbook.xml"].documentElement.getElementsByTagName("sheets")[0]
             for sheet in _sheets.childNodes:
                 
-                obj = workbook.sheet(sheet._attrs['name'].value, ls, celltype)
+                obj = workbook.sheet(sheet._attrs['name'].value, sheet._attrs['sheetId'].value, ls, celltype)
                 
                 self.sheets[sheet._attrs['name'].value]= obj
                 self.i_sheets.append(obj)
@@ -76,9 +76,9 @@ class workbook(object):
     class sheet():
         sheet_dir = "xl/worksheets/"
         cells = {}
-        def __init__(self, name, ls, celltype):
+        def __init__(self, name, id, ls, celltype):
             self.name = name
-            self.filename = self.sheet_dir + name.lower() + ".xml"
+            self.filename = self.sheet_dir + "sheet" + id + ".xml"
             self.dom = ls[self.filename]
             rows = self.dom.documentElement.getElementsByTagName("sheetData")[0].getElementsByTagName("row")
             if celltype:
