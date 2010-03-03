@@ -6,9 +6,7 @@ class workbook(object):
         self.filename = filename
         self.ls = self.DOM(filename)
         self.Sheets = self.sheets(self.ls, celltype)
-    
-    
-    
+        
     def __repr__(self):
         return "<Workbook object [%s]@%s>" % (self.filename, self.Sheets)
     
@@ -26,7 +24,8 @@ class workbook(object):
             if r:
                 dom = filehandle
             else:
-                dom = minidom.parseString(filehandle.read(file))
+                _str = filehandle.read(file)
+                dom = minidom.parseString(_str)
                 filehandle.close
             return dom
         def __repr__(self):
@@ -37,9 +36,9 @@ class workbook(object):
         i_sheets = []
         def __init__(self, ls, celltype):
             _sheets = ls["xl/workbook.xml"].documentElement.getElementsByTagName("sheets")[0]
+            _shared = ls["xl/sharedStrings.xml"].documentElement.getElementsByTagName("si")
             for sheet in _sheets.childNodes:
-                
-                obj = workbook.sheet(sheet._attrs['name'].value, sheet._attrs['sheetId'].value, ls, celltype)
+                obj = workbook.sheet(sheet._attrs['name'].value, sheet._attrs['r:id'].value.replace("rId",""), ls, celltype, _shared)
                 
                 self.sheets[sheet._attrs['name'].value]= obj
                 self.i_sheets.append(obj)
@@ -76,7 +75,7 @@ class workbook(object):
     class sheet():
         sheet_dir = "xl/worksheets/"
         cells = {}
-        def __init__(self, name, id, ls, celltype):
+        def __init__(self, name, id, ls, celltype, shared):
             self.name = name
             self.filename = self.sheet_dir + "sheet" + id + ".xml"
             self.dom = ls[self.filename]
@@ -88,14 +87,26 @@ class workbook(object):
             for row in rows:
                 cells = row.getElementsByTagName("c")
                 for cell in cells:
-                    name = cell.attributes.items()[0][1]
-                    val = cell.getElementsByTagName("v")[0]._get_firstChild().nodeValue
+                    name = cell._attrs['r'].value
+                    _share = False
+
+                    if 't' in cell._attrs: _share = True
+                    
+                    try:
+                        val = cell.getElementsByTagName("v")[0]._get_firstChild().nodeValue
+                    except:
+                        #Blank cell
+                        val = ""
+                        
+                    if _share:
+                        val = shared[int(val)].getElementsByTagName("t")[0]._get_firstChild().nodeValue
+                    
                     cell = celltype(name, val)
                     self.cells[name] = cell
                     self.__dict__[name] = cell
         
         def __repr__(self):
-            return  "<sheet '%s'>" % self.name
+            return  "<Sheet '%s'>" % self.name
         
         def keys(self):
             return self.cells.keys()
@@ -117,24 +128,30 @@ class workbook(object):
             return len(self.cells)
         
         def regcell(self, name, val):
-            if int(val):
-                if float(val) - int(val) == 0: val = int(val)
-                else: val = float(val)
+            try:
+                if float(val):
+                    val = float(val)
+                    if val - int(val) == 0: val = int(val)
+            except ValueError:
+                pass
             return val
     
     class cell(object):
         def __init__(self, name, val):
             self.name = name
-            if int(val):
-                if float(val) - int(val) == 0: val = int(val)
-                else: val = float(val)
+            try:
+                if float(val):
+                    val = float(val)
+                    if val - int(val) == 0: val = int(val)
+            except ValueError:
+                pass
             self.val = val
         
         def __int__(self):
             return int(self.val)
         
         def __float__(self):
-            return int(self.val)
+            return float(self.val)
         
         def __str__(self):
             return str(self.val)
