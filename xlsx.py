@@ -219,8 +219,10 @@ class workbook(object):
             if not result:
                 raise RuntimeError('Cannot Evaluate Unsyntaxical Expressions')
             try:
-                self.val = eval(result,{}, {"workbook":self.sheet.workbook})
-                return self.val
+                _return = eval(result,{}, {"workbook":self.sheet.workbook})
+                if not isinstance(_return, list):
+                    self.val = _return
+                return _return
             except:
                 if strict:
                     raise exc_info()[0]("\nBad Formula Expression: %s\n\n\tEval:\t%s\n\tOrig:\t%s"%(str(exc_info()[1]), result, self.fn))

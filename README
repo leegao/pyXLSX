@@ -9,3 +9,4 @@ from xlsx import workbook
 Workbook = workbook("File.xlsx")
 Workbook.Sheets.Sheet1.A1 # Accesses the cell 'A1' in the Sheet1 worksheet.
 Workbook.Sheets.Sheet1["A1"] # Same as above
+print Workbook.Sheets.Sheet.F1.evaluate() #Evaluation of the formulas
