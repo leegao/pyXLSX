@@ -16,10 +16,11 @@ class workbook(object):
     def __iter__(self):
         return iter(self.Sheets)
     
-    def extend(self, fn):
+    @classmethod
+    def extend(cls, fn):
         if not ('func_code' in dir(fn)): raise RuntimeError('Cannot Extend Workbook Formulas with Nonfunctions')
         key = fn.func_name
-        self.__dict__[key.upper()]=fn
+        cls.__dict__[key.upper()]=fn
     
     class DOM():
         def __init__(self, filename):
@@ -82,8 +83,8 @@ class workbook(object):
                 
     class sheet():
         sheet_dir = "xl/worksheets/"
-        cells = {}
         def __init__(self, name, id, ls, celltype, shared, workbook):
+            self.cells = {}
             self.name = name
             self.filename = self.sheet_dir + "sheet" + id + ".xml"
             self.dom = ls[self.filename]
@@ -134,9 +135,9 @@ class workbook(object):
         def __getitem__(self, key):
             if key not in self.cells.keys():
                 return None
-            _return = self.__dict__[key]
+            _return = self.cells[key]
             #if isinstance(_return, workbook.cell): _return = _return.val
-            return self.cells[key]
+            return _return
         
         def __iter__(self):
             return iter(self.cells)
@@ -178,9 +179,9 @@ class workbook(object):
                 _ret = [self[o].val for o in _range]
                 return str(_ret)
             
-            #Case 3: Else
-            
-            ###Unimplemented Yet###
+            #Case 3: Else -- [[A1,A2,A3],[B1,B2,B3],[C1,C2,C3]]
+            _range = [[self[a+str(n)].val for n in range(N0, N1+1)] for a in range_alpha(A0, A1)]
+            return str(_range)
             
             return tokens
         def interpolate(self, text):
