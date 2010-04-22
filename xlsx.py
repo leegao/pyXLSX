@@ -3,7 +3,11 @@ from xml.dom import minidom
 from range_alpha import range_alpha
 from sys import exc_info
 
-
+def _flatten(list):
+    _return = []
+    for l in list: _return += l
+    return _return
+    
 class workbook(object):
     def __init__(self, filename, celltype = False):
         self.filename = filename
@@ -20,7 +24,14 @@ class workbook(object):
     def extend(cls, fn):
         if not ('func_code' in dir(fn)): raise RuntimeError('Cannot Extend Workbook Formulas with Nonfunctions')
         key = fn.func_name
-        cls.__dict__[key.upper()]=fn
+        setattr(cls, key.upper(), classmethod(lambda self, *args: fn(*args)))
+    
+    @classmethod
+    def flatten(cls, fn):
+        if not ('func_code' in dir(fn)): raise RuntimeError('Cannot Extend Workbook Formulas with Nonfunctions')
+        _lambda = lambda list, depth: fn(_flatten([list] if not depth else list))
+        _lambda.func_name = fn.func_name
+        return _lambda
     
     class DOM():
         def __init__(self, filename):
@@ -45,9 +56,16 @@ class workbook(object):
         i_sheets = []
         def __init__(self, ls, celltype, workbook):
             _sheets = ls["xl/workbook.xml"].documentElement.getElementsByTagName("sheets")[0]
-            _shared = ls["xl/sharedStrings.xml"].documentElement.getElementsByTagName("si")
+            try:
+                _shared = ls["xl/sharedStrings.xml"].documentElement.getElementsByTagName("si")
+            except:
+                _shared = None
+            try:
+                _calc = ls["xl/calcChain.xml"].documentElement.getElementsByTagName("c")
+            except:
+                _calc = None
             for sheet in _sheets.childNodes:
-                obj = workbook.sheet(sheet._attrs['name'].value, sheet._attrs['r:id'].value.replace("rId",""), ls, celltype, _shared, workbook)
+                obj = workbook.sheet(sheet._attrs['name'].value, sheet._attrs['r:id'].value.replace("rId",""), ls, celltype, _shared, _calc, workbook)
                 
                 self.sheets[sheet._attrs['name'].value]= obj
                 self.i_sheets.append(obj)
@@ -83,7 +101,7 @@ class workbook(object):
                 
     class sheet():
         sheet_dir = "xl/worksheets/"
-        def __init__(self, name, id, ls, celltype, shared, workbook):
+        def __init__(self, name, id, ls, celltype, shared, calc, workbook):
             self.cells = {}
             self.name = name
             self.filename = self.sheet_dir + "sheet" + id + ".xml"
@@ -95,6 +113,7 @@ class workbook(object):
             else:
                 #Revert to legacy support
                 celltype = self.regcell
+            _sis = {}
             for row in rows:
                 cells = row.getElementsByTagName("c")
                 for cell in cells:
@@ -104,7 +123,15 @@ class workbook(object):
                     _fn = None
                     
                     if 't' in cell._attrs: _share = True
-                    if cell.getElementsByTagName("f"): _fn = cell.getElementsByTagName("f")[0]._get_firstChild().nodeValue
+                    if cell.getElementsByTagName("f"): 
+                        if 'si' in cell.getElementsByTagName("f")[0]._attrs:
+                            if cell.getElementsByTagName("f")[0]._get_firstChild():
+                                _fn = cell.getElementsByTagName("f")[0]._get_firstChild().nodeValue
+                                _sis[cell.getElementsByTagName("f")[0]._attrs['si'].nodeValue] = _fn
+                            else:
+                                _fn = _sis[cell.getElementsByTagName("f")[0]._attrs['si'].nodeValue]
+                        else:
+                            _fn = cell.getElementsByTagName("f")[0]._get_firstChild().nodeValue
                     
                     try:
                         val = cell.getElementsByTagName("v")[0]._get_firstChild().nodeValue
@@ -150,6 +177,8 @@ class workbook(object):
         
         def REPLACE(self, match):
             tokens = match.group().split(":")
+            if len(tokens) == 1:
+                return str(self[tokens[0].upper()].val)
             #Structure:
             #    A+1+
             #Cases:
@@ -170,22 +199,23 @@ class workbook(object):
                 #Range in numer
                 _range = [A0+str(n) for n in range(N0, N1+1)]
                 _ret = [self[o].val for o in _range]
-                return str(_ret)
+                return str(_ret) +", 0"
             
             #Case 2: Same numer
             if N0 == N1:
                 #Range in alpha
                 _range = [a+str(N0) for a in range_alpha(A0, A1)]
                 _ret = [self[o].val for o in _range]
-                return str(_ret)
+                return str(_ret) +", 0"
             
             #Case 3: Else -- [[A1,A2,A3],[B1,B2,B3],[C1,C2,C3]]
-            _range = [[self[a+str(n)].val for n in range(N0, N1+1)] for a in range_alpha(A0, A1)]
-            return str(_range)
+            _ra = range_alpha(A0, A1)
+            _range = [[self[a+str(n)].val for n in range(N0, N1+1)] for a in _ra]
+            return str(_range) + ", " + str(len(_ra)) if len(_ra) > 1 else "0"
             
             return tokens
         def interpolate(self, text):
-            rn = re.compile(r"[a-z|A-Z]+[0-9]+\:*[a-z|A-Z]+[0-9]+\:*")
+            rn = re.compile(r"[a-z|A-Z]+[0-9]+\:*(?:[a-z|A-Z]+[0-9]+\:*)?")
             fn = re.compile(r"(?<=\(|\))?[a-z|A-Z]*(?=\()")
             return rn.sub(self.REPLACE, fn.sub(self.PARSE, text))
         
@@ -209,13 +239,14 @@ class workbook(object):
             except ValueError:
                 pass
             
-            self.fn = fn
             self.sheet = sheet
+            self.fn = fn
             self.val = val
         def parse(self):
             if self.fn:
                 return self.sheet.interpolate(self.fn)
         def evaluate(self, strict=True):
+            if not self.fn: return
             result = self.parse()
             if not result:
                 raise RuntimeError('Cannot Evaluate Unsyntaxical Expressions')
@@ -231,8 +262,12 @@ class workbook(object):
                     return False
         def __setattr__(self, key, val):
             if key == "fn":
-                pass
+                self.__dict__[key]=val
+                _val = self.evaluate()
+                if _val: self.__dict__["val"] = _val
+                return
             self.__dict__[key]=val
+            
         
         def __int__(self):
             return int(self.val)
@@ -260,7 +295,24 @@ class workbook(object):
                 return self.val + float(other)
             else:
                 return  str(other)+str(self.val)
+            
+@workbook.extend
+@workbook.flatten
+def SUM(list):
+    sigma = 0
+    for n in list:
+        sigma += n
+    return sigma
 
+@workbook.extend
+@workbook.flatten
+def AVERAGE(list):
+    sigma = 0.0
+    i = 0
+    for n in list:
+        sigma += n
+        i+=1
+    return sigma/i
 
 if __name__ == "__main__":
     Workbook = workbook("test.xlsx")
