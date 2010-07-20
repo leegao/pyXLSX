@@ -2,18 +2,13 @@ from xlsx import workbook
 
 Workbook = workbook("test.xlsx")
 
-@Workbook.extend
-def SUM(lst):
-    _n = 0
-    for n in lst:
-        try:
-            _n += n
-        except:
-            pass
-    return _n
+s = Workbook.Sheets.Sheet1
+print "Total Formulas Tested: %s"%len(s.keys())
+print "CELL:\tFunction,\t\tEval,\t\tOrig"
 
-Workbook.Sheets.Sheet1.F1.fn = "A1:D1"
-print Workbook.Sheets.Sheet1.F1.evaluate()
-
-Workbook.Sheets.Sheet1.F1.fn = "SUM(A1:D1)*4"
-print Workbook.Sheets.Sheet1.F1.evaluate()
+for c in s:
+    cell = s[c]
+    orig = cell.val
+    cell.evaluate()
+    if cell.fn:
+        print "%s:\t%s,\t\t%s,\t\t%s"%(c,cell.fn if hasattr(cell, "fn") else "", cell.val, orig)

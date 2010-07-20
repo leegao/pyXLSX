@@ -1,12 +1,18 @@
+from __future__ import division
 import zipfile, re
 from xml.dom import minidom
 from range_alpha import range_alpha
 from sys import exc_info
 
+
 def _flatten(list):
     _return = []
-    for l in list: _return += l
-    return _return
+    if not list: return []
+    if type(list[0]) == type([]):
+        for l in list: _return += l if type(l) == type([]) else [l]
+        return _flatten(_return)
+    else:
+        return list
     
 class workbook(object):
     def __init__(self, filename, celltype = False):
@@ -29,7 +35,26 @@ class workbook(object):
     @classmethod
     def flatten(cls, fn):
         if not ('func_code' in dir(fn)): raise RuntimeError('Cannot Extend Workbook Formulas with Nonfunctions')
-        _lambda = lambda list, depth: fn(_flatten([list] if not depth else list))
+        _lambda = lambda *list: fn(_flatten(list))
+        _lambda.func_name = fn.func_name
+        return _lambda
+    
+    @classmethod
+    def singular(cls, fn):
+        if not ('func_code' in dir(fn)): raise RuntimeError('Cannot Extend Workbook Formulas with Nonfunctions')
+        _lambda = lambda *list: fn(_flatten(list)[0])
+        _lambda.func_name = fn.func_name
+        return _lambda
+    @classmethod
+    def plural(cls, fn):
+        if not ('func_code' in dir(fn)): raise RuntimeError('Cannot Extend Workbook Formulas with Nonfunctions')
+        _lambda = lambda *args: fn(*args)
+        _lambda.func_name = fn.func_name
+        return _lambda
+    @classmethod
+    def void(cls, fn):
+        if not ('func_code' in dir(fn)): raise RuntimeError('Cannot Extend Workbook Formulas with Nonfunctions')
+        _lambda = lambda *args: fn()
         _lambda.func_name = fn.func_name
         return _lambda
     
@@ -102,6 +127,7 @@ class workbook(object):
     class sheet():
         sheet_dir = "xl/worksheets/"
         def __init__(self, name, id, ls, celltype, shared, calc, workbook):
+            self.load = False
             self.cells = {}
             self.name = name
             self.filename = self.sheet_dir + "sheet" + id + ".xml"
@@ -140,12 +166,15 @@ class workbook(object):
                         val = ""
                         
                     if _share:
-                        val = shared[int(val)].getElementsByTagName("t")[0]._get_firstChild().nodeValue
+                        try:
+                            val = shared[int(val)].getElementsByTagName("t")[0]._get_firstChild().nodeValue
+                        except:
+                            pass
                     
                     cell = celltype(name, val, self, _fn)
                     self.cells[name] = cell
                     self.__dict__[name] = cell
-        
+            self.load = True
         def __repr__(self):
             return  "<Sheet '%s'>" % self.name
         
@@ -167,7 +196,9 @@ class workbook(object):
             return _return
         
         def __iter__(self):
-            return iter(self.cells)
+            _keys = self.cells.keys()
+            _keys.sort()
+            return iter(_keys)
         
         def __len__(self):
             return len(self.cells)
@@ -175,9 +206,17 @@ class workbook(object):
         def PARSE(self, match):
             return "workbook."+match.group().upper()
         
+        def PARSELIST(self, match):
+            lst = match.group().strip("{").strip("}")
+            lst = ["["+", ".join(l.split(","))+"]" for l in lst.split(";")]
+            lst = "[" + ", ".join(lst) + "]" if len(lst) else lst[0]
+            return str(lst)
+        
         def REPLACE(self, match):
             tokens = match.group().split(":")
+            #print tokens
             if len(tokens) == 1:
+                #print tokens
                 return str(self[tokens[0].upper()].val)
             #Structure:
             #    A+1+
@@ -199,25 +238,34 @@ class workbook(object):
                 #Range in numer
                 _range = [A0+str(n) for n in range(N0, N1+1)]
                 _ret = [self[o].val for o in _range]
-                return str(_ret) +", 0"
+                return str(_ret)
             
             #Case 2: Same numer
             if N0 == N1:
                 #Range in alpha
                 _range = [a+str(N0) for a in range_alpha(A0, A1)]
                 _ret = [self[o].val for o in _range]
-                return str(_ret) +", 0"
+                return str(_ret)
             
             #Case 3: Else -- [[A1,A2,A3],[B1,B2,B3],[C1,C2,C3]]
             _ra = range_alpha(A0, A1)
             _range = [[self[a+str(n)].val for n in range(N0, N1+1)] for a in _ra]
-            return str(_range) + ", " + str(len(_ra)) if len(_ra) > 1 else "0"
+            return str(_range)
             
             return tokens
         def interpolate(self, text):
-            rn = re.compile(r"[a-z|A-Z]+[0-9]+\:*(?:[a-z|A-Z]+[0-9]+\:*)?")
-            fn = re.compile(r"(?<=\(|\))?[a-z|A-Z]*(?=\()")
-            return rn.sub(self.REPLACE, fn.sub(self.PARSE, text))
+            """
+            E2A: function
+            E2: not function
+            E2:E4: not function
+            E2+: not function
+            E2-: not function
+            E2*/: not function
+            """
+            rn = re.compile(r"(?<!\")(?<!\\.)(?:[a-z|A-Z]+[0-9]+:?(?:[a-z|A-Z]+[0-9]+\:?)?)(?:(?=[+\-*/% \,)])|(?!.))")
+            fn = re.compile(r"(?<=\(|\))?[a-z|A-Z|0-9]*(?=\()")
+            lst = re.compile(r"{.+?}")
+            return rn.sub(self.REPLACE, fn.sub(self.PARSE, lst.sub(self.PARSELIST, text)))
         
         def regcell(self, name, val, sheet, fn=None):
             #Legacy
@@ -244,6 +292,7 @@ class workbook(object):
             self.val = val
         def parse(self):
             if self.fn:
+                #print self.fn
                 return self.sheet.interpolate(self.fn)
         def evaluate(self, strict=True):
             if not self.fn: return
@@ -251,8 +300,8 @@ class workbook(object):
             if not result:
                 raise RuntimeError('Cannot Evaluate Unsyntaxical Expressions')
             try:
-                _return = eval(result,{}, {"workbook":self.sheet.workbook})
-                if not isinstance(_return, list):
+                _return = eval(result,{}, {"workbook":self.sheet.workbook, "TRUE":1, "FALSE":0})
+                if _return:
                     self.val = _return
                 return _return
             except:
@@ -262,9 +311,13 @@ class workbook(object):
                     return False
         def __setattr__(self, key, val):
             if key == "fn":
-                self.__dict__[key]=val
-                _val = self.evaluate()
-                if _val: self.__dict__["val"] = _val
+                try:
+                    self.__dict__[key]=val
+                    _val = self.evaluate()
+                    if _val: self.__dict__["val"] = _val
+                except AttributeError:
+                    if self.sheet.load:
+                        raise exc_info()
                 return
             self.__dict__[key]=val
             
@@ -296,23 +349,7 @@ class workbook(object):
             else:
                 return  str(other)+str(self.val)
             
-@workbook.extend
-@workbook.flatten
-def SUM(list):
-    sigma = 0
-    for n in list:
-        sigma += n
-    return sigma
-
-@workbook.extend
-@workbook.flatten
-def AVERAGE(list):
-    sigma = 0.0
-    i = 0
-    for n in list:
-        sigma += n
-        i+=1
-    return sigma/i
+from formulas import *
 
 if __name__ == "__main__":
     Workbook = workbook("test.xlsx")
